@@ -1,7 +1,7 @@
 use anyhow::Result;
 use byteorder::{BigEndian, ReadBytesExt};
 use std::fmt::{self, Display};
-use std::io::Write;
+use std::io::{self, Write};
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -104,40 +104,46 @@ impl Display for Opcode {
 }
 
 fn main() -> Result<()> {
-    let input_file = "listing_0037_single_register_mov";
+    let input_file = "listing_0038_many_register_mov";
     let f = File::open(input_file)?;
     let mut reader = BufReader::new(f);
-    let binary = reader.read_u16::<BigEndian>()?;
-
     let output_file = File::create(format!("{}.asm", input_file))?;
     let mut writer = BufWriter::new(output_file);
 
-    let byte_1 = ((binary & 0b11111111_00000000) >> 8) as u8;
-    let byte_2 = binary as u8;
-
-    let opcode_bytes = (byte_1 & 0b11111100) >> 2; // TODO: cannot always shift by 2
-    let opcode = Opcode::new(opcode_bytes);
-    let d = byte_1 & (0b00000010);
-    let w = byte_1 & (0b00000001);
-    let r#mod = (byte_2 & 0b11000000) >> 6;
-    let reg = (byte_2 & (0b00111000)) >> 3;
-    let rm = byte_2 & (0b00000111);
-
     writeln!(writer, "bits 16")?;
+    writeln!(writer, "")?;
+    loop {
+        let binary = match reader.read_u16::<BigEndian>() {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(e.into()),
+        };
 
-    if r#mod == 0b11 {
-        // REGISTER MODE
-        let source_reg: Register;
-        let dest_reg: Register;
-        if d == 0 {
-            source_reg = Register::create(reg, w);
-            dest_reg = Register::create(rm, w);
-        } else {
-            source_reg = Register::create(rm, w);
-            dest_reg = Register::create(reg, w);
+        let byte_1 = ((binary & 0b11111111_00000000) >> 8) as u8;
+        let byte_2 = binary as u8;
+
+        let opcode_bytes = (byte_1 & 0b11111100) >> 2; // TODO: cannot always shift by 2
+        let opcode = Opcode::new(opcode_bytes);
+        let d = byte_1 & (0b00000010);
+        let w = byte_1 & (0b00000001);
+        let r#mod = (byte_2 & 0b11000000) >> 6;
+        let reg = (byte_2 & (0b00111000)) >> 3;
+        let rm = byte_2 & (0b00000111);
+
+        if r#mod == 0b11 {
+            // REGISTER MODE
+            let source_reg: Register;
+            let dest_reg: Register;
+            if d == 0 {
+                source_reg = Register::create(reg, w);
+                dest_reg = Register::create(rm, w);
+            } else {
+                source_reg = Register::create(rm, w);
+                dest_reg = Register::create(reg, w);
+            }
+
+            writeln!(writer, "mov {}, {}", dest_reg, source_reg)?;
         }
-
-        writeln!(writer, "mov {}, {}", dest_reg, source_reg)?;
     }
     Ok(())
 }
