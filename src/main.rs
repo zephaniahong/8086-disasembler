@@ -1,5 +1,6 @@
 use anyhow::Result;
 use byteorder::{BigEndian, ReadBytesExt};
+use std::env;
 use std::fmt::{self, Display};
 use std::io::{self, Write};
 use std::{
@@ -104,8 +105,15 @@ impl Display for Opcode {
 }
 
 fn main() -> Result<()> {
-    let input_file = "listing_0038_many_register_mov";
-    let f = File::open(input_file)?;
+    let args: Vec<String> = env::args().collect();
+
+    if args.len() < 2 {
+        eprintln!("Usage: {} <argument>", args[0]);
+        return Ok(());
+    }
+
+    let input_file = args[1].clone();
+    let f = File::open(&input_file)?;
     let mut reader = BufReader::new(f);
     let output_file = File::create(format!("{}.asm", input_file))?;
     let mut writer = BufWriter::new(output_file);
@@ -124,8 +132,10 @@ fn main() -> Result<()> {
 
         let opcode_bytes = (byte_1 & 0b11111100) >> 2; // TODO: cannot always shift by 2
         let opcode = Opcode::new(opcode_bytes);
+
         let d = byte_1 & (0b00000010);
         let w = byte_1 & (0b00000001);
+
         let r#mod = (byte_2 & 0b11000000) >> 6;
         let reg = (byte_2 & (0b00111000)) >> 3;
         let rm = byte_2 & (0b00000111);
