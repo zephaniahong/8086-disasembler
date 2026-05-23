@@ -1,5 +1,6 @@
 use anyhow::Result;
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
+use log::info;
 use std::env;
 use std::fmt::{self, Display};
 use std::io::{self, Write};
@@ -82,8 +83,48 @@ impl Display for Register {
     }
 }
 
+#[allow(unused)]
 enum Opcode {
     MOV,
+}
+
+struct Memory {}
+
+impl Memory {
+    pub fn get_effective_address(rm: u8, r#mod: u8) -> String {
+        match rm {
+            0b000 => String::from("bx + si"),
+            0b001 => String::from("bx + di"),
+            0b010 => String::from("bp + si"),
+            0b011 => String::from("bp + di"),
+            0b100 => String::from("si"),
+            0b101 => String::from("di"),
+            0b110 => {
+                if r#mod == 0b00 {
+                    unimplemented!("direct address");
+                } else {
+                    String::from("bp")
+                }
+            }
+            0b111 => String::from("bx"),
+            _ => unimplemented!("rm must be between 0 and 7"),
+        }
+    }
+    pub fn new(rm: u8, r#mod: u8, low_data: Option<u8>, high_data: Option<u16>) -> String {
+        let default = Memory::get_effective_address(rm, r#mod);
+        match r#mod {
+            0b00 => {
+                format!("[{}]", default)
+            }
+            0b01 => {
+                format!("[{} + {}]", default, low_data.unwrap())
+            }
+            0b10 => {
+                format!("[{} + {}]", default, high_data.unwrap())
+            }
+            _ => unimplemented!("mod is only 2 bits"),
+        }
+    }
 }
 
 impl Opcode {
@@ -110,6 +151,7 @@ fn get_effective_address(rm: u8, r#mod: u8) -> String {
 }
 
 fn main() -> Result<()> {
+    env_logger::init();
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
@@ -125,6 +167,7 @@ fn main() -> Result<()> {
 
     writeln!(writer, "bits 16")?;
     writeln!(writer, "")?;
+    // 10001011
     loop {
         let byte_1 = match reader.read_u8() {
             Ok(b) => b,
@@ -134,311 +177,64 @@ fn main() -> Result<()> {
 
         match byte_1 {
             0b10001000..=0b10001011 => {
+                // Register/Memory to/from register
                 let byte_2 = reader.read_u8()?;
-
-                // let opcode_bytes = (byte_1 & 0b11111100) >> 2; // TODO: cannot always shift by 2
-                // let opcode = Opcode::new(opcode_bytes);
-
                 let d = byte_1 & (0b00000010);
                 let w = byte_1 & (0b00000001);
 
                 let r#mod = (byte_2 & 0b11000000) >> 6;
                 let reg = (byte_2 & (0b00111000)) >> 3;
                 let rm = byte_2 & (0b00000111);
+
+                let source: String;
+                let dest: String;
                 match r#mod {
                     0b11 => {
                         // REGISTER MODE
-                        let source_reg: Register;
-                        let dest_reg: Register;
                         if d == 0 {
-                            source_reg = Register::new(reg, w);
-                            dest_reg = Register::new(rm, w);
+                            source = Register::new(reg, w).to_string();
+                            dest = Register::new(rm, w).to_string();
                         } else {
-                            source_reg = Register::new(rm, w);
-                            dest_reg = Register::new(reg, w);
+                            source = Register::new(rm, w).to_string();
+                            dest = Register::new(reg, w).to_string();
                         }
-
-                        writeln!(writer, "mov {}, {}", dest_reg, source_reg)?;
                     }
                     0b00 => {
                         // Memmory mode, no displacement*
-                        match rm {
-                            0b000 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + si]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + si]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b001 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + di]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + di]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b010 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + si]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + si]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b011 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + di]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + di]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b100 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[si]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[si]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b101 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[di]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[di]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b110 => {
-                                unimplemented!("direct address")
-                            }
-                            0b111 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx]");
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            _ => unreachable!("R/M field is only 3 bits"),
+                        if d == 0 {
+                            source = Register::new(reg, w).to_string();
+                            dest = Memory::new(rm, r#mod, None, None);
+                        } else {
+                            dest = Register::new(reg, w).to_string();
+                            source = Memory::new(rm, r#mod, None, None);
                         }
                     }
                     0b01 => {
                         let low_byte = reader.read_u8()?;
-                        match rm {
-                            0b000 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + si + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + si + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b001 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + di + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + di + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b010 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + si + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + si + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b011 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + di + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + di + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b100 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[si + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[si + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b101 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[di + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[di + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b110 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b111 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + {}]", low_byte);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            _ => unreachable!("R/M field is only 3 bits"),
+                        if d == 0 {
+                            source = Register::new(reg, w).to_string();
+                            dest = Memory::new(rm, r#mod, Some(low_byte), None);
+                        } else {
+                            dest = Register::new(reg, w).to_string();
+                            source = Memory::new(rm, r#mod, Some(low_byte), None);
                         }
                     }
                     0b10 => {
                         let disp = reader.read_u16::<LittleEndian>()?;
-
-                        match rm {
-                            0b000 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + si + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + si + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b001 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + di + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + di + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b010 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + si + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + si + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b011 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + di + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + di + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b100 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[si + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[si + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b101 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[di + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[di + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b110 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bp + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bp + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            0b111 => {
-                                if d == 0 {
-                                    let source = Register::new(reg, w);
-                                    let dest = format!("[bx + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                } else {
-                                    let dest = Register::new(reg, w);
-                                    let source = format!("[bx + {}]", disp);
-                                    writeln!(writer, "mov {}, {}", dest, source)?;
-                                }
-                            }
-                            _ => unreachable!("R/M field is only 3 bits"),
+                        if d == 0 {
+                            source = Register::new(reg, w).to_string();
+                            dest = Memory::new(rm, r#mod, None, Some(disp));
+                        } else {
+                            dest = Register::new(reg, w).to_string();
+                            source = Memory::new(rm, r#mod, None, Some(disp));
                         }
                     }
-                    _ => unreachable!("Mod field is only 2 bits"),
+                    _ => unimplemented!("mod is only 2 bits"),
                 }
+                writeln!(writer, "mov {}, {}", dest, source)?;
             }
             0b10110000..=0b10111111 => {
+                // Immediate to register
                 let w = (byte_1 & 0b00001000) >> 3;
                 let reg_bytes = byte_1 & 0b00000111;
                 let reg = Register::new(reg_bytes, w);
